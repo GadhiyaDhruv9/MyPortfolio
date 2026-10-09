@@ -88,7 +88,18 @@ export function createLot(txn: Transaction): Lot {
     buyCharges: txn.totalCharges,
     costBasis,
     perShareCost: txn.quantity > 0 ? costBasis / txn.quantity : 0,
+    productType: txn.productType,
   };
+}
+
+/**
+ * Lots a sell draws from, in order. Intraday (MIS) sells square off the same day's
+ * buys first; everything else is strict FIFO by buy date.
+ */
+function consumptionOrder(queue: Lot[], txn: Transaction): Lot[] {
+  if (txn.productType !== 'MIS') return queue;
+  const sameDay = queue.filter((l) => l.buyDate === txn.tradeDate);
+  return [...sameDay, ...queue.filter((l) => l.buyDate !== txn.tradeDate)];
 }
 
 export interface FifoIssue {
@@ -167,7 +178,7 @@ export function applyFIFO(transactions: Transaction[]): FifoResult {
     if (LOT_CONSUMING_TYPES.includes(txn.type)) {
       let toSell = txn.quantity;
       const sellNetPerShare = txn.quantity > 0 ? txn.netAmount / txn.quantity : 0;
-      for (const lot of queue) {
+      for (const lot of consumptionOrder(queue, txn)) {
         if (toSell <= EPS) break;
         if (lot.remainingQty <= EPS) continue;
         const take = Math.min(lot.remainingQty, toSell);
@@ -267,7 +278,7 @@ export function previewSell(
   let toSell = draft.quantity;
   let totalBuyCost = 0;
   let estimatedGain = 0;
-  for (const lot of open) {
+  for (const lot of consumptionOrder(open, draft)) {
     if (toSell <= EPS) break;
     const take = Math.min(lot.remainingQty, toSell);
     const buyCost = take * lot.perShareCost;

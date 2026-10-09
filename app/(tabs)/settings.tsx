@@ -12,8 +12,10 @@ import { Input } from '../../src/components/Input';
 import { Modal } from '../../src/components/Modal';
 import { Screen, SectionTitle } from '../../src/components/Screen';
 import { Select } from '../../src/components/Select';
+import { ZerodhaPanel } from '../../src/components/ZerodhaPanel';
 import { useData } from '../../src/data/DataContext';
 import { uid } from '../../src/data/store';
+import { clearSession } from '../../src/integrations/zerodha/kiteAuth';
 import { rulesOn, TAX_DISCLAIMER } from '../../src/domain/tax';
 import type { ChargeTemplate, Portfolio, TaxRules } from '../../src/domain/types';
 import { confirm, notify } from '../../src/lib/confirm';
@@ -87,6 +89,9 @@ export default function Settings() {
         )}
       </Card>
 
+      <SectionTitle>Broker</SectionTitle>
+      <ZerodhaPanel index={2} />
+
       <SectionTitle right={<Button title="Add" size="sm" variant="ghost" icon="add" onPress={() => setEditingTemplate(newTemplate())} />}>Charge templates</SectionTitle>
       <Card index={2} padded={false}>
         {data.chargeTemplates.map((t, i) => (
@@ -132,7 +137,10 @@ export default function Settings() {
           icon="trash-outline"
           variant="danger"
           onPress={async () => {
-            if (await confirm('Clear all data?', 'Every portfolio, transaction and setting on this device will be deleted. This cannot be undone — back up first.', 'Clear everything')) clearAll();
+            if (await confirm('Clear all data?', 'Every portfolio, transaction and setting on this device will be deleted. This cannot be undone — back up first.', 'Clear everything')) {
+              clearAll();
+              await clearSession();
+            }
           }}
         />
       </Card>

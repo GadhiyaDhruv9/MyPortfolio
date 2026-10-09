@@ -13,8 +13,10 @@
     "expo-font": "~57.0.4",
     "expo-linking": "~57.0.12",
     "expo-router": "~57.0.25",
+    "expo-secure-store": "~57.0.4",
     "expo-sharing": "~57.0.22",
     "expo-status-bar": "~57.0.1",
+    "expo-web-browser": "~57.0.3",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
@@ -40,7 +42,7 @@
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
-    "test": "node --import tsx --test src/domain/__tests__/*.test.ts"
+    "test": "node --import tsx --test \"src/**/__tests__/*.test.ts\""
   },
   "private": true
 }

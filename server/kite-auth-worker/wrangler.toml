@@ -1,0 +1,7 @@
+name = "kite-auth"
+main = "index.js"
+compatibility_date = "2026-09-01"
+
+# Secrets are not stored here. Set them once with:
+#   npx wrangler secret put KITE_API_KEY
+#   npx wrangler secret put KITE_API_SECRET

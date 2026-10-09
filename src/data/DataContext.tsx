@@ -12,6 +12,7 @@ import type {
   TaxRules,
   Transaction,
 } from '../domain/types';
+import { applyImportPlan, type ImportPlan } from '../integrations/zerodha/importer';
 import { emptyData, loadData, normalizeData, saveData, seedData } from './store';
 
 interface DataContextValue {
@@ -35,6 +36,8 @@ interface DataContextValue {
   deleteChargeTemplate: (id: string) => void;
   updateTaxRules: (r: TaxRules) => void;
   updateSettings: (s: Partial<Settings>) => void;
+  /** Applies a broker import/sync in one update. */
+  applyImport: (plan: Pick<ImportPlan, 'newInstruments' | 'upserts' | 'removeIds'>, quotes?: PriceQuote[], syncedAt?: string) => void;
   replaceAll: (raw: unknown) => void;
   clearAll: () => void;
   resetToSample: () => void;
@@ -118,6 +121,16 @@ export function DataProvider({ children }: { children: ReactNode }) {
           return { ...d, taxRules: rules.sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom)) };
         }),
       updateSettings: (s) => update((d) => ({ ...d, settings: { ...d.settings, ...s } })),
+      applyImport: (plan, quotes = [], syncedAt) =>
+        update((d) => {
+          const next = applyImportPlan(d, plan);
+          const updated = new Set(quotes.map((q) => q.instrumentId));
+          return {
+            ...next,
+            quotes: [...d.quotes.filter((q) => !updated.has(q.instrumentId)), ...quotes],
+            settings: syncedAt ? { ...d.settings, zerodha: { ...d.settings.zerodha, lastSyncAt: syncedAt } } : d.settings,
+          };
+        }),
       replaceAll: (raw) => {
         const next = normalizeData(raw);
         setSelectedPortfolioId(null);

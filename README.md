@@ -28,6 +28,52 @@ On first launch the app seeds sample data: 2 portfolios, 10 instruments, 28 tran
 - **Reports**: realized P&L by month, quarter, year or FY; per-period breakdown with win rate; capital gains per FY with loss set-off and carry-forward; charges breakdown; CSV export.
 - **Settings**: privacy mode, portfolios, charge templates, tax rules, JSON backup and restore, clear data.
 
+## Zerodha integration
+
+Two ways to bring in your Zerodha trades. You can use both; trades are matched by trade ID, so nothing gets imported twice.
+
+### 1. Tradebook CSV import (history, free, no setup)
+
+1. Go to [console.zerodha.com](https://console.zerodha.com) → **Reports → Tradebook**, choose **Equity**, pick a date range (up to one FY at a time) and download it as **CSV**.
+2. In the app, go to **Settings → Broker → Import tradebook CSV** and pick the file.
+3. Check the preview and tap **Import**.
+
+How the import works:
+- Fills are merged into one transaction per day, stock and side.
+- Same-day buys and sells of a stock become intraday (MIS); the rest is delivery (CNC).
+- F&O, currency and commodity rows are skipped.
+- The tradebook has no charges, so they are estimated from the delivery and intraday templates chosen in **Zerodha settings**.
+- Bonus and split corporate actions are not in the tradebook. Add them by hand under Transactions → Other transaction types.
+
+### 2. Kite Connect live sync (holdings, today's trades, prices)
+
+Kite's login needs your **API secret**, which must never be on the phone. A small free Cloudflare Worker (`server/kite-auth-worker`) holds it and does the token exchange. Setup takes one time:
+
+1. **Create a Kite Connect app** at [developers.kite.trade](https://developers.kite.trade) and choose a plan. Live market quotes need the paid plan; without it, prices still update for stocks in your Zerodha holdings. Note the **API key** and **API secret**.
+2. **Deploy the worker** (needs a free [Cloudflare](https://dash.cloudflare.com/sign-up) account):
+   ```bash
+   cd server/kite-auth-worker
+   npx wrangler login
+   npx wrangler secret put KITE_API_KEY      # paste the API key
+   npx wrangler secret put KITE_API_SECRET   # paste the API secret
+   npx wrangler deploy                       # prints https://kite-auth.<you>.workers.dev
+   ```
+3. In the Kite developer console, set the app's **Redirect URL** to `https://kite-auth.<you>.workers.dev/callback`.
+4. In the app, go to **Settings → Broker → Zerodha settings**. Enter the **API key** and the **auth server URL** (`https://kite-auth.<you>.workers.dev`), and pick the portfolio to sync into.
+5. Tap **Login with Zerodha**, log in, then tap **Sync now**.
+
+What a sync does:
+- Adds today's trades.
+- Updates prices.
+- Lists any stock where the app's quantity differs from Zerodha's settled holdings, usually because older trades still need a CSV import.
+
+Limits:
+- Zerodha sessions expire every day at 6 AM (a SEBI rule), so log in once a day before syncing.
+- Kite's API only returns **today's** trades; history comes from the CSV.
+- Sync works in the iOS/Android app, not the web build.
+
+The access token is kept in the phone's secure storage and is never included in JSON backups.
+
 ## Project layout
 
 ```
@@ -39,6 +85,8 @@ src/domain/              Pure business logic (no React): fifo, charges, tax, ret
 src/data/                AsyncStorage persistence, seed data, React context
 src/lib/                 Indian number/date formatting, theme, export, confirm dialogs
 src/components/          UI building blocks and charts (react-native-svg)
+src/integrations/zerodha/ Tradebook CSV parser, importer, Kite Connect client and login
+server/kite-auth-worker/ Cloudflare Worker that holds the Kite API secret
 ```
 
 ## Notes

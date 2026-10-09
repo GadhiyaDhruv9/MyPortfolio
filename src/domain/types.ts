@@ -64,6 +64,22 @@ export interface Transaction {
   reason?: string;
   /** Template the charges were calculated from; absent when entered manually. */
   chargeTemplateId?: string;
+  /** Where the transaction came from; absent means entered by hand. */
+  source?: TxnSource;
+  /** Broker fills merged into this transaction (used to skip duplicates on re-import). */
+  importedFills?: ImportedFill[];
+}
+
+export type TxnSource = 'manual' | 'zerodha_csv' | 'kite';
+
+export interface ImportedFill {
+  /** Broker trade ID. */
+  id: string;
+  orderId?: string;
+  side: 'BUY' | 'SELL';
+  quantity: number;
+  price: number;
+  time?: string;
 }
 
 export interface Lot {
@@ -80,6 +96,7 @@ export interface Lot {
   /** Cost of the remaining quantity (reduced as the lot is consumed). */
   costBasis: number;
   perShareCost: number;
+  productType?: ProductType;
 }
 
 export interface RealizedTrade {
@@ -160,6 +177,8 @@ export interface ChargeTemplate {
   stampDutyBuyPct: number;
   gstPct: number;
   dpCharges: number;
+  /** Upper limit on brokerage per order for the "percent" type (e.g. ₹20); 0 = no cap. */
+  brokerageMax?: number;
 }
 
 export interface PriceQuote {
@@ -169,9 +188,22 @@ export interface PriceQuote {
   updatedAt: string;
 }
 
+export interface ZerodhaSettings {
+  /** Kite Connect API key (public identifier; the secret stays on the auth server). */
+  apiKey?: string;
+  /** Base URL of the deployed auth worker, e.g. https://kite-auth.example.workers.dev */
+  authServerUrl?: string;
+  /** Portfolio that imported trades and holdings belong to. */
+  portfolioId?: string;
+  deliveryTemplateId?: string;
+  intradayTemplateId?: string;
+  lastSyncAt?: string;
+}
+
 export interface Settings {
   privacyMode: boolean;
   defaultChargeTemplateId: string;
+  zerodha: ZerodhaSettings;
 }
 
 export interface AppData {

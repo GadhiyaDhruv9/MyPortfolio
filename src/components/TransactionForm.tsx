@@ -110,6 +110,9 @@ export function TransactionForm({ editing, onClose }: Props) {
       notes: notes.trim() || undefined,
       tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
       chargeTemplateId: !override && isBuySell ? templateId : undefined,
+      // Keep import metadata so re-importing the same broker trades doesn't duplicate them.
+      source: editing?.source,
+      importedFills: editing?.importedFills,
     };
   }, [instrumentId, portfolioId, charges, needsQty, needsPrice, qty, px, txnType, tradeDate, productType, reason, notes, tags, override, isBuySell, templateId, editing]);
 

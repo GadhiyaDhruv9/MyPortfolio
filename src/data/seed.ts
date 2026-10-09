@@ -28,8 +28,15 @@ export function emptyData(): AppData {
     quotes: [],
     chargeTemplates: DEFAULT_CHARGE_TEMPLATES.map((t) => ({ ...t })),
     taxRules: DEFAULT_TAX_RULES.map((r) => ({ ...r })),
-    settings: { privacyMode: false, defaultChargeTemplateId: DEFAULT_CHARGE_TEMPLATES[0].id },
+    settings: { privacyMode: false, defaultChargeTemplateId: DEFAULT_CHARGE_TEMPLATES[0].id, zerodha: {} },
   };
+}
+
+/** Keeps the user's templates and adds any built-in template introduced since (e.g. intraday). */
+function withDefaultTemplates(templates: ChargeTemplate[] | undefined): ChargeTemplate[] {
+  if (!templates?.length) return DEFAULT_CHARGE_TEMPLATES.map((t) => ({ ...t }));
+  const missing = DEFAULT_CHARGE_TEMPLATES.filter((t) => !templates.some((x) => x.id === t.id));
+  return [...templates, ...missing.map((t) => ({ ...t }))];
 }
 
 /** Fills in anything missing from older or hand-edited data so the app never crashes on load. */
@@ -48,9 +55,9 @@ export function normalizeData(raw: unknown): AppData {
     transactions: d.transactions ?? [],
     dividends: d.dividends ?? [],
     quotes: d.quotes ?? [],
-    chargeTemplates: d.chargeTemplates?.length ? d.chargeTemplates : base.chargeTemplates,
+    chargeTemplates: withDefaultTemplates(d.chargeTemplates),
     taxRules: d.taxRules?.length ? d.taxRules : base.taxRules,
-    settings: { ...base.settings, ...(d.settings ?? {}) },
+    settings: { ...base.settings, ...(d.settings ?? {}), zerodha: { ...(d.settings?.zerodha ?? {}) } },
   };
 }
 

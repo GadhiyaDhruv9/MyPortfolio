@@ -49,6 +49,21 @@ export const DEFAULT_CHARGE_TEMPLATES: ChargeTemplate[] = [
     gstPct: 18,
     dpCharges: 15.34,
   },
+  {
+    id: 'tpl_intraday',
+    name: 'Intraday (0.03% or ₹20)',
+    brokerageType: 'percent',
+    brokerageFlat: 0,
+    brokeragePercent: 0.03,
+    brokerageMax: 20,
+    sttBuyPct: 0,
+    sttSellPct: 0.025,
+    exchangeChargesPct: 0.00297,
+    sebiFeePer10L: 1,
+    stampDutyBuyPct: 0.003,
+    gstPct: 18,
+    dpCharges: 0,
+  },
 ];
 
 export function calculateCharges(
@@ -62,7 +77,10 @@ export function calculateCharges(
 
   let brokerage = 0;
   if (template.brokerageType === 'flat_per_order') brokerage = template.brokerageFlat;
-  else if (template.brokerageType === 'percent') brokerage = (tradeValue * template.brokeragePercent) / 100;
+  else if (template.brokerageType === 'percent') {
+    brokerage = (tradeValue * template.brokeragePercent) / 100;
+    if (template.brokerageMax && template.brokerageMax > 0) brokerage = Math.min(brokerage, template.brokerageMax);
+  }
   if (tradeValue <= 0) brokerage = 0;
 
   const stt = (tradeValue * (isBuy ? template.sttBuyPct : template.sttSellPct)) / 100;

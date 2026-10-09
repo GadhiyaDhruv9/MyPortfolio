@@ -3,7 +3,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { TxnTypeBadge } from '../../src/components/Badge';
+import { Badge, TxnTypeBadge } from '../../src/components/Badge';
 import { Button, IconButton } from '../../src/components/Button';
 import { Card } from '../../src/components/Card';
 import { EmptyState } from '../../src/components/EmptyState';
@@ -167,7 +167,10 @@ function TxnRow({
       <View style={styles.row}>
         <TxnTypeBadge type={t.type} />
         <View style={{ flex: 1 }}>
-          <Text style={styles.symbol}>{symbol}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={styles.symbol}>{symbol}</Text>
+            {t.source === 'kite' || t.source === 'zerodha_csv' ? <Badge label={t.source === 'kite' ? 'Kite sync' : 'Imported'} tone="neutral" /> : null}
+          </View>
           <Text style={type.caption}>
             {formatDate(t.tradeDate)}
             {t.productType !== 'CNC' ? ` · ${t.productType}` : ''}
