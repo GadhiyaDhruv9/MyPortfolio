@@ -1,0 +1,48 @@
+workflows:
+  ios-simulator-build:
+    name: iOS simulator build (unsigned)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      node: 22
+      xcode: latest
+      cocoapods: default
+    triggering:
+      events:
+        - push
+        - pull_request
+      branch_patterns:
+        - pattern: main
+        - pattern: develop
+    cache:
+      cache_paths:
+        - $HOME/.npm
+        - $HOME/Library/Caches/CocoaPods
+    scripts:
+      - name: Install dependencies
+        script: npm ci
+      - name: Typecheck and lint
+        script: |
+          npx tsc --noEmit
+          npx expo lint
+      - name: Generate native iOS project
+        script: npx expo prebuild --platform ios --non-interactive
+      - name: Build for iOS simulator
+        script: |
+          WORKSPACE=$(ls -d ios/*.xcworkspace | head -n 1)
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath build/ios \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+      - name: Package .app
+        script: |
+          cd build/ios/Build/Products/Release-iphonesimulator
+          zip -r "$CM_BUILD_DIR/PortfolioTracker-simulator.zip" ./*.app
+    artifacts:
+      - PortfolioTracker-simulator.zip
