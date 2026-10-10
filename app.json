@@ -22,7 +22,12 @@
     },
     "web": {
       "bundler": "metro",
-      "favicon": "./assets/favicon.png"
+      "output": "single",
+      "favicon": "./assets/favicon.png",
+      "name": "Portfolio Tracker",
+      "shortName": "Portfolio",
+      "themeColor": "#f2f4f7",
+      "backgroundColor": "#f2f4f7"
     },
     "plugins": [
       "expo-router",
@@ -32,6 +37,12 @@
       "expo-font",
       "expo-secure-store",
       "expo-web-browser"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "3ab0b228-b503-4b19-a7f8-8f4af41d262b"
+      }
+    }
   }
 }

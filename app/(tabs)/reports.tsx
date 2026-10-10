@@ -18,7 +18,7 @@ import { periodBreakdown, type PeriodKind } from '../../src/domain/reports';
 import { computeCapitalGains, financialYearsWithSales } from '../../src/domain/tax';
 import { notify } from '../../src/lib/confirm';
 import { realizedCsv, shareTextFile, transactionsCsv } from '../../src/lib/export';
-import { formatINRCompact } from '../../src/lib/format';
+import { formatINR } from '../../src/lib/format';
 import { colors, spacing, type } from '../../src/lib/theme';
 
 const PERIODS: { label: string; value: PeriodKind }[] = [
@@ -84,7 +84,7 @@ export default function Reports() {
 
       <Card index={0} title="Realized P&L" subtitle={`By ${PERIODS.find((p) => p.value === period)!.label.toLowerCase()} period`} right={<InfoButton title="Realized P&L" body={INFO.realized} />}>
         {rows.some((r) => r.realizedPnL !== 0) ? (
-          <BarChart data={rows.map((r) => ({ label: r.label, value: r.realizedPnL }))} formatValue={formatINRCompact} hideValues={hidden} />
+          <BarChart data={rows.map((r) => ({ label: r.label, value: r.realizedPnL }))} formatValue={formatINR} hideValues={hidden} />
         ) : (
           <Text style={type.small}>No sells yet.</Text>
         )}
@@ -130,7 +130,7 @@ export default function Reports() {
         <Line label="STCL carry forward" value={cg.stclCarryForward} info={INFO.carry} />
         <Line label="LTCL carry forward" value={cg.ltclCarryForward} info={INFO.carry} />
         <Line label="STCG taxable" value={cg.stcgTaxable} />
-        <Line label={`LTCG exemption used (max ${formatINRCompact(cg.rules.ltcgExemption)})`} value={cg.ltcgExemptionUsed} />
+        <Line label={`LTCG exemption used (max ${formatINR(cg.rules.ltcgExemption)})`} value={cg.ltcgExemptionUsed} />
         <Line label="LTCG taxable" value={cg.ltcgTaxable} />
         <View style={styles.divider} />
         <Line label={`Tax @ ${cg.stcgRate.toFixed(1)}% / ${cg.ltcgRate.toFixed(1)}%`} value={cg.baseTax} />
@@ -167,10 +167,10 @@ export default function Reports() {
 
 const COLS: [string, number][] = [
   ['Period', 96],
-  ['Bought', 96],
-  ['Sold', 96],
-  ['Realized', 100],
-  ['Charges', 84],
+  ['Bought', 124],
+  ['Sold', 124],
+  ['Realized', 128],
+  ['Charges', 108],
   ['Trades', 56],
   ['Win %', 60],
 ];
@@ -178,7 +178,7 @@ const COLS: [string, number][] = [
 function Cell({ w, value, pnl }: { w: number; value: number; pnl?: boolean }) {
   return (
     <View style={{ width: w, alignItems: 'flex-end' }}>
-      <Money value={value} variant={pnl ? 'signedCompact' : 'compact'} colored={pnl} style={styles.td} />
+      <Money value={value} variant={pnl ? 'signed' : 'full'} colored={pnl} style={styles.td} />
     </View>
   );
 }
@@ -200,7 +200,7 @@ function Line({ label, value, pnl, info }: { label: string; value: number; pnl?:
 const INFO = {
   realized: ['Gain or loss on each sell, matched to the oldest buys first (FIFO). Sell value is net of sell charges and buy cost includes buy charges.', 'A trade counts as a win when the sell’s total realized gain is positive.'],
   stcg: ['Listed shares and equity ETFs held 365 days or less (sold via delivery).', `Shown as gains minus losses within the head, before cross set-off.`],
-  ltcg: ['Held for more than 365 days. Shares bought before 1 Feb 2018 use the grandfathered cost: higher of actual cost and the lower of the 31 Jan 2018 FMV and the sale price.', 'An annual exemption (₹1.25 lakh by default) applies once per FY across all portfolios.'],
+  ltcg: ['Held for more than 365 days. Shares bought before 1 Feb 2018 use the grandfathered cost: higher of actual cost and the lower of the 31 Jan 2018 FMV and the sale price.', 'An annual exemption (₹1,25,000.00 by default) applies once per FY across all portfolios.'],
   intraday: ['MIS or same-day trades are speculative business income, taxed at your slab rate. Only totals are shown; no tax is computed here.'],
   carry: ['Short-term losses can offset both STCG and LTCG; long-term losses can only offset LTCG.', 'Unabsorbed losses can be carried forward for 8 assessment years, provided you file your return on time.'],
   tax: [

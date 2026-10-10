@@ -42,7 +42,8 @@
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
-    "test": "node --import tsx --test \"src/**/__tests__/*.test.ts\""
+    "test": "node --import tsx --test \"src/**/__tests__/*.test.ts\"",
+    "build:web": "expo export -p web"
   },
   "private": true
 }

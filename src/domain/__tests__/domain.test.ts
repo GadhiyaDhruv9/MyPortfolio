@@ -117,6 +117,56 @@ describe('FIFO', () => {
   });
 });
 
+describe('demerger', () => {
+  // Like Tata Motors → TMCV: 1 new share per share held, ~31.65% of the cost moves across.
+  const history = () => [
+    txn({ type: 'BUY', tradeDate: '2023-03-01', quantity: 10, price: 400, totalCharges: 10 }),
+    txn({ type: 'BUY', tradeDate: '2024-06-01', quantity: 6, price: 900 }),
+    txn({ type: 'SELL', tradeDate: '2024-09-01', quantity: 4, price: 1000 }),
+    txn({ type: 'DEMERGER', tradeDate: '2025-10-14', quantity: 1, price: 1, demergedInstrumentId: 'i2', costSharePct: 31.65 }),
+  ];
+
+  it('moves part of each lot’s cost to the new company, keeping buy dates', () => {
+    const { lots, issues } = applyFIFO(history());
+    assert.deepEqual(issues, []);
+    const parent = lots.filter((l) => l.instrumentId === 'i1' && l.remainingQty > 0);
+    const child = lots.filter((l) => l.instrumentId === 'i2');
+    // 6 left from the 2023 lot, 6 from the 2024 lot.
+    assert.deepEqual(child.map((l) => [l.buyDate, l.remainingQty]), [['2023-03-01', 6], ['2024-06-01', 6]]);
+    const before = 6 * (400 + 1) + 6 * 900; // 2023 lot cost includes ₹1/share charges
+    close(child.reduce((s, l) => s + l.costBasis, 0), before * 0.3165);
+    close(parent.reduce((s, l) => s + l.costBasis, 0), before * 0.6835);
+    close(child[0].buyPrice, 400 * 0.3165);
+    close(parent[0].buyPrice, 400 * 0.6835);
+  });
+
+  it('carries the holding period over when the new shares are sold', () => {
+    const txns = [...history(), txn({ type: 'SELL', tradeDate: '2025-11-01', quantity: 6, price: 300, instrumentId: 'i2' })];
+    const { realized, issues } = applyFIFO(txns);
+    assert.deepEqual(issues, []);
+    const sale = realized.find((r) => r.instrumentId === 'i2');
+    assert.equal(sale?.buyDate, '2023-03-01');
+    assert.equal(sale?.classification, 'ltcg');
+    close(sale!.buyCost, 6 * 401 * 0.3165);
+  });
+
+  it('lets the new company’s shares be sold and shown as a holding', () => {
+    const draft = txn({ type: 'SELL', tradeDate: '2025-11-01', quantity: 8, price: 300, instrumentId: 'i2' });
+    const preview = previewSell(history(), draft);
+    assert.equal(preview.available, 12);
+    assert.equal(preview.shortfall, 0);
+    const holdings = computeHoldings(history(), [], []);
+    assert.equal(holdings.find((h) => h.instrumentId === 'i2')?.quantity, 12);
+  });
+
+  it('stays reference-only without a new company', () => {
+    const txns = history().map((t) => (t.type === 'DEMERGER' ? { ...t, demergedInstrumentId: undefined } : t));
+    const { lots } = applyFIFO(txns);
+    assert.equal(lots.some((l) => l.instrumentId === 'i2'), false);
+    close(lots.filter((l) => l.instrumentId === 'i1').reduce((s, l) => s + l.costBasis, 0), 6 * 401 + 6 * 900);
+  });
+});
+
 describe('charges', () => {
   it('computes a zero-brokerage delivery buy', () => {
     const c = calculateCharges(DEFAULT_CHARGE_TEMPLATES[0], 'BUY', 100, 1000);

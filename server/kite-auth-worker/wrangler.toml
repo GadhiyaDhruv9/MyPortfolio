@@ -1,7 +1,19 @@
 name = "kite-auth"
 main = "index.js"
 compatibility_date = "2026-09-01"
+workers_dev = true
+preview_urls = false
 
 # Secrets are not stored here. Set them once with:
 #   npx wrangler secret put KITE_API_KEY
 #   npx wrangler secret put KITE_API_SECRET
+
+[vars]
+# Browser origins allowed to use the worker (the hosted PWA and the local dev server).
+WEB_ORIGINS = "https://dhruvg9-my-portfolio.expo.app,http://localhost:8081"
+
+# Hands the login result from the Zerodha login window back to the web app.
+# Create it once with `npx wrangler kv namespace create KITE_HANDOFF` and paste the id below.
+[[kv_namespaces]]
+binding = "KITE_HANDOFF"
+id = "695249d034b8439e8202bfda01a1135f"

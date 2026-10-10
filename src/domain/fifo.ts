@@ -118,11 +118,38 @@ const EPS = 1e-9;
 const lotKey = (portfolioId: string, instrumentId: string) => `${portfolioId}|${instrumentId}`;
 
 /**
+ * Instruments whose lots depend on each other through demergers (the new company's
+ * shares come from the parent's lots), including `instrumentId` itself.
+ */
+export function linkedInstrumentIds(transactions: Transaction[], instrumentId: string): Set<string> {
+  const ids = new Set([instrumentId]);
+  const links = transactions.filter((t) => t.type === 'DEMERGER' && t.demergedInstrumentId);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const t of links) {
+      const has = ids.has(t.instrumentId);
+      if (has !== ids.has(t.demergedInstrumentId!)) {
+        ids.add(has ? t.demergedInstrumentId! : t.instrumentId);
+        grew = true;
+      }
+    }
+  }
+  return ids;
+}
+
+/** Transactions needed to replay one instrument's lots in a portfolio. */
+export function transactionsFor(transactions: Transaction[], portfolioId: string, instrumentId: string): Transaction[] {
+  const ids = linkedInstrumentIds(transactions, instrumentId);
+  return transactions.filter((t) => t.portfolioId === portfolioId && ids.has(t.instrumentId));
+}
+
+/**
  * Replays transactions and returns lots and realized trades. Lots are tracked per
  * portfolio (demat account) and instrument; sells consume the oldest lot first.
  *
- * MERGER and DEMERGER are kept for the record but do not change lots — enter the
- * resulting shares as TRANSFER_IN/TRANSFER_OUT with the apportioned cost.
+ * A DEMERGER moves `costSharePct` % of each open parent lot's cost into a lot of the
+ * new company, keeping the original buy date (the holding period carries over for tax).
+ * MERGER, and a DEMERGER without a new company, are kept for the record only.
  */
 export function applyFIFO(transactions: Transaction[]): FifoResult {
   const queues = new Map<string, Lot[]>();
@@ -156,6 +183,47 @@ export function applyFIFO(transactions: Transaction[]): FifoResult {
         lot.buyPrice = lot.buyPrice / (1 + ratio);
         lot.perShareCost = lot.costBasis / lot.remainingQty;
       }
+      continue;
+    }
+
+    if (txn.type === 'DEMERGER' && txn.demergedInstrumentId) {
+      const ratio = txn.price > 0 ? txn.quantity / txn.price : 0;
+      const share = (txn.costSharePct ?? 0) / 100;
+      if (!(ratio > 0) || !(share >= 0 && share < 1)) {
+        issues.push({ txnId: txn.id, message: 'Demerger needs a share ratio above 0 and a cost share from 0 to under 100%.' });
+        continue;
+      }
+      const childKey = lotKey(txn.portfolioId, txn.demergedInstrumentId);
+      const childQueue = queues.get(childKey) ?? [];
+      queues.set(childKey, childQueue);
+      for (const lot of queue) {
+        if (lot.remainingQty <= EPS) continue;
+        const qty = lot.remainingQty * ratio;
+        const cost = lot.costBasis * share;
+        const charges = lot.buyCharges * share;
+        const child: Lot = {
+          id: `lot_${txn.id}_${lot.id}`,
+          instrumentId: txn.demergedInstrumentId,
+          portfolioId: txn.portfolioId,
+          buyTxnId: lot.buyTxnId,
+          buyDate: lot.buyDate,
+          originalQty: qty,
+          remainingQty: qty,
+          buyPrice: (lot.buyPrice * lot.remainingQty * share) / qty,
+          buyCharges: charges,
+          costBasis: cost,
+          perShareCost: cost / qty,
+          productType: lot.productType,
+        };
+        lot.costBasis -= cost;
+        lot.buyCharges -= charges;
+        lot.buyPrice *= 1 - share;
+        lot.perShareCost = lot.costBasis / lot.remainingQty;
+        childQueue.push(child);
+        lots.push(child);
+      }
+      // Inherited lots keep their old buy dates; keep the new company's queue oldest first.
+      childQueue.sort((a, b) => a.buyDate.localeCompare(b.buyDate));
       continue;
     }
 
@@ -237,14 +305,10 @@ export function availableQuantity(
   onDate: string,
   excludeTxnId?: string,
 ): number {
-  const relevant = transactions.filter(
-    (t) =>
-      t.portfolioId === portfolioId &&
-      t.instrumentId === instrumentId &&
-      t.tradeDate <= onDate &&
-      t.id !== excludeTxnId,
-  );
-  return applyFIFO(relevant).lots.reduce((s, l) => s + l.remainingQty, 0);
+  const relevant = transactionsFor(transactions, portfolioId, instrumentId).filter((t) => t.tradeDate <= onDate && t.id !== excludeTxnId);
+  return applyFIFO(relevant)
+    .lots.filter((l) => l.instrumentId === instrumentId)
+    .reduce((s, l) => s + l.remainingQty, 0);
 }
 
 export interface SellPreview {
@@ -262,15 +326,11 @@ export function previewSell(
   draft: Transaction,
   excludeTxnId?: string,
 ): SellPreview {
-  const prior = transactions.filter(
-    (t) =>
-      t.portfolioId === draft.portfolioId &&
-      t.instrumentId === draft.instrumentId &&
-      t.id !== excludeTxnId &&
-      sortTransactions([t, draft])[0] === t,
+  const prior = transactionsFor(transactions, draft.portfolioId, draft.instrumentId).filter(
+    (t) => t.id !== excludeTxnId && sortTransactions([t, draft])[0] === t,
   );
   const { lots } = applyFIFO(prior);
-  const open = lots.filter((l) => l.remainingQty > EPS);
+  const open = lots.filter((l) => l.instrumentId === draft.instrumentId && l.remainingQty > EPS);
   const available = open.reduce((s, l) => s + l.remainingQty, 0);
   const byClass: Record<GainClassification, number> = { intraday: 0, stcg: 0, ltcg: 0 };
   const consumed: SellPreview['consumed'] = [];

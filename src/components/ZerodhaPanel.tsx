@@ -9,7 +9,7 @@ import { uid } from '../data/store';
 import type { AppData, ZerodhaSettings } from '../domain/types';
 import { planImport, type ImportPlan } from '../integrations/zerodha/importer';
 import { KiteError, kiteApi, openInstrumentKeys, planKiteSync, tokenExpiry, type KiteSession, type SyncPlan } from '../integrations/zerodha/kite';
-import { clearSession, kiteSupported, loadSession, loginWithZerodha } from '../integrations/zerodha/kiteAuth';
+import { clearSession, hasPendingWebLogin, loadSession, loginWithZerodha, resumeWebLogin } from '../integrations/zerodha/kiteAuth';
 import { parseTradebook } from '../integrations/zerodha/tradebook';
 import { notify } from '../lib/confirm';
 import { formatDate, formatQty } from '../lib/format';
@@ -19,6 +19,7 @@ import { Button } from './Button';
 import { Card } from './Card';
 import { Input } from './Input';
 import { Modal } from './Modal';
+import { Money } from './Money';
 import { Select } from './Select';
 
 /** Resolves the portfolio and charge templates imports should use. */
@@ -45,7 +46,8 @@ export function ZerodhaPanel({ index }: { index: number }) {
   const { data, applyImport } = useData();
   const z = data.settings.zerodha;
   const [session, setSession] = useState<KiteSession | null>(null);
-  const [busy, setBusy] = useState<'login' | 'sync' | 'csv' | null>(null);
+  // The iPhone home-screen app can reload while the Zerodha window is open; that login resumes below.
+  const [busy, setBusy] = useState<'login' | 'sync' | 'csv' | null>(() => (hasPendingWebLogin() ? 'login' : null));
   const [setupOpen, setSetupOpen] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
   const config = resolveConfig(data);
@@ -53,6 +55,11 @@ export function ZerodhaPanel({ index }: { index: number }) {
 
   useEffect(() => {
     loadSession().then(setSession);
+    if (!hasPendingWebLogin()) return;
+    resumeWebLogin()
+      .then((s) => s && setSession(s))
+      .catch((e) => notify('Login failed', e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(null));
   }, []);
 
   const importOptions = (source: 'zerodha_csv' | 'kite') => ({
@@ -163,18 +170,17 @@ export function ZerodhaPanel({ index }: { index: number }) {
         </Text>
 
         <Button title="Import tradebook CSV" icon="document-attach-outline" variant="secondary" onPress={importCsv} loading={busy === 'csv'} />
-        {kiteSupported ? (
-          session ? (
-            <View style={styles.row}>
-              <Button title="Sync now" icon="sync" onPress={sync} loading={busy === 'sync'} style={{ flex: 1 }} />
-              <Button title="Log out" variant="secondary" onPress={logout} />
-            </View>
-          ) : (
-            <Button title={configured ? 'Login with Zerodha' : 'Set up Kite Connect'} icon="log-in-outline" onPress={configured ? sync : () => setSetupOpen(true)} loading={busy === 'login' || busy === 'sync'} />
-          )
+        {session ? (
+          <View style={styles.row}>
+            <Button title="Sync now" icon="sync" onPress={sync} loading={busy === 'sync'} style={{ flex: 1 }} />
+            <Button title="Log out" variant="secondary" onPress={logout} />
+          </View>
         ) : (
-          <Text style={type.caption}>Live sync works in the iOS/Android app (Kite’s API can’t be called from a browser). CSV import works here.</Text>
+          <Button title={configured ? 'Login with Zerodha' : 'Set up Kite Connect'} icon="log-in-outline" onPress={configured ? sync : () => setSetupOpen(true)} loading={busy === 'login' || busy === 'sync'} />
         )}
+        {busy === 'login' && Platform.OS === 'web' ? (
+          <Text style={type.caption}>Finish logging in to Zerodha in the window that opened, then close it and come back here.</Text>
+        ) : null}
         <Button title="Zerodha settings" variant="ghost" icon="settings-outline" onPress={() => setSetupOpen(true)} />
       </Card>
 
@@ -259,6 +265,48 @@ function ResultSheet({ result, data, onClose, onConfirm }: { result: Result; dat
             <Text style={[type.small, { color: colors.success, fontWeight: '600' }]}>Holdings match Zerodha.</Text>
           </View>
         )
+      ) : null}
+
+      {result.kind === 'sync' && result.plan.holdingsCount ? (
+        <View style={styles.box}>
+          <Text style={type.h3}>Invested amount vs Zerodha</Text>
+          <Text style={type.caption}>
+            Cost of the shares you hold, without charges (Kite’s average price leaves them out). This app uses FIFO, so after a partial sale your oldest shares count as sold first; Kite’s average can differ.
+          </Text>
+          <View style={styles.mismatch}>
+            <Text style={[type.small, { flex: 1 }]}>Zerodha</Text>
+            <Money value={result.plan.zerodhaInvested} style={type.small} />
+          </View>
+          <View style={styles.mismatch}>
+            <Text style={[type.small, { flex: 1 }]}>This app</Text>
+            <Money value={result.plan.appInvested} style={type.small} />
+          </View>
+          <View style={styles.mismatch}>
+            <Text style={[type.h3, { flex: 1 }]}>Difference</Text>
+            <Money value={result.plan.appInvested - result.plan.zerodhaInvested} variant="signed" colored style={type.h3} />
+          </View>
+          {result.plan.investedDiffs.length ? (
+            <>
+              <Text style={[type.caption, { marginTop: spacing.sm }]}>By stock (app − Zerodha), largest first:</Text>
+              {result.plan.investedDiffs.map((d) => (
+                <View key={d.instrumentId} style={{ paddingVertical: 4 }}>
+                  <View style={styles.mismatch}>
+                    <Text style={[type.h3, { flex: 1 }]}>{d.symbol}</Text>
+                    <Money value={d.app - d.zerodha} variant="signed" colored style={type.small} />
+                  </View>
+                  <View style={styles.mismatch}>
+                    <Text style={type.caption}>Zerodha</Text>
+                    <Money value={d.zerodha} style={type.caption} />
+                    <Text style={type.caption}>→ App</Text>
+                    <Money value={d.app} style={type.caption} />
+                  </View>
+                </View>
+              ))}
+            </>
+          ) : (
+            <Text style={[type.small, { color: colors.success, fontWeight: '600' }]}>Every stock’s invested amount matches.</Text>
+          )}
+        </View>
       ) : null}
 
       {isPreview && plan.upserts.length ? (
@@ -346,7 +394,11 @@ function ZerodhaSetup({ onClose }: { onClose: () => void }) {
       <View style={styles.box}>
         <Text style={type.small}>• Zerodha sessions expire every day at 6 AM — log in once a day to sync.</Text>
         <Text style={type.small}>• Sync reads your holdings, today’s trades and prices. Older trades come from the tradebook CSV.</Text>
-        <Text style={type.small}>• Your access token is kept in the phone’s secure storage and is not included in backups.</Text>
+        <Text style={type.small}>
+          {Platform.OS === 'web'
+            ? '• Your access token is kept in this browser’s storage and is not included in backups. On web, Kite requests go through your auth server.'
+            : '• Your access token is kept in the phone’s secure storage and is not included in backups.'}
+        </Text>
       </View>
     </Modal>
   );

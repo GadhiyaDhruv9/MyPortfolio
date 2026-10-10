@@ -15,7 +15,7 @@ import { useSelection } from '../../src/data/useSelection';
 import { addDays, todayISO } from '../../src/domain/fifo';
 import { allocationBySector, dividendTotals, valueHistory } from '../../src/domain/holdings';
 import type { HoldingSummary } from '../../src/domain/types';
-import { formatDate, formatINRCompact, formatPct, pnlColor } from '../../src/lib/format';
+import { formatDate, formatINR, formatPct, pnlColor } from '../../src/lib/format';
 import { colors, spacing, type } from '../../src/lib/theme';
 
 type Range = '1W' | '1M' | '3M' | '6M' | '1Y' | 'ALL';
@@ -62,17 +62,17 @@ export default function Dashboard() {
     <Screen title="Dashboard">
       <View style={styles.grid}>
         <StatTile index={0} label="Current value" info={INFO.currentValue}>
-          <Money value={totals.currentValue} variant="compact" style={type.value} />
+          <Money value={totals.currentValue} style={styles.big} />
         </StatTile>
         <StatTile index={1} label="Total invested" info={INFO.invested}>
-          <Money value={totals.invested} variant="compact" style={type.value} />
+          <Money value={totals.invested} style={styles.big} />
         </StatTile>
         <StatTile index={2} label="Total P&L" info={INFO.pnl}>
-          <Money value={totals.unrealizedPnL} variant="signedCompact" colored style={type.value} />
+          <Money value={totals.unrealizedPnL} variant="signed" colored style={styles.big} />
           <Text style={[styles.sub, { color: pnlColor(totals.unrealizedPnLPct) }]}>{formatPct(totals.unrealizedPnLPct)}</Text>
         </StatTile>
         <StatTile index={3} label="XIRR" info={INFO.xirr}>
-          <Text style={[type.value, { color: pnlColor(xirrPct) }]}>{formatPct(xirrPct)}</Text>
+          <Text style={[styles.big, { color: pnlColor(xirrPct) }]}>{formatPct(xirrPct)}</Text>
           <Text style={styles.sub}>annualised</Text>
         </StatTile>
       </View>
@@ -87,7 +87,7 @@ export default function Dashboard() {
         {history.length >= 2 ? (
           <LineChart
             data={history.map((p) => ({ label: formatDate(p.date), value: p.value, secondary: p.invested }))}
-            formatValue={formatINRCompact}
+            formatValue={formatINR}
             hideValues={hidden}
             color={lineColor}
           />
@@ -102,15 +102,15 @@ export default function Dashboard() {
 
       <View style={styles.grid}>
         <StatTile index={5} label="Today's P&L" info={INFO.today}>
-          <Money value={totals.dayChange} variant="signedCompact" colored style={styles.mid} />
+          <Money value={totals.dayChange} variant="signed" colored style={styles.mid} />
           <Text style={[styles.sub, { color: pnlColor(totals.dayChangePct) }]}>{formatPct(totals.dayChangePct)}</Text>
         </StatTile>
         <StatTile index={6} label="Realized P&L" info={INFO.realized}>
-          <Money value={totals.realizedPnL} variant="signedCompact" colored style={styles.mid} />
+          <Money value={totals.realizedPnL} variant="signed" colored style={styles.mid} />
           <Text style={styles.sub}>{new Set(fifo.realized.map((r) => r.sellTxnId)).size} sells</Text>
         </StatTile>
         <StatTile index={7} label="Dividends received" info={INFO.dividends}>
-          <Money value={divTotals.net} variant="compact" style={styles.mid} />
+          <Money value={divTotals.net} style={styles.mid} />
           <Text style={styles.sub}>{divTotals.count} payouts</Text>
         </StatTile>
         <StatTile index={8} label="Positions" info={INFO.positions}>
@@ -123,7 +123,7 @@ export default function Dashboard() {
         {allocation.length ? (
           <DonutChart
             slices={allocation.map((a) => ({ label: a.label, value: a.value }))}
-            centerValue={hidden ? MASK : formatINRCompact(totals.currentValue)}
+            centerValue={hidden ? MASK : formatINR(totals.currentValue)}
             centerLabel={`${allocation.length} sectors`}
           />
         ) : (
@@ -173,7 +173,7 @@ function MoverList({ items, empty }: { items: HoldingSummary[]; empty: string })
           </View>
           <View style={{ alignItems: 'flex-end' }}>
             <Text style={[styles.moverPct, { color: pnlColor(h.unrealizedPnLPct) }]}>{formatPct(h.unrealizedPnLPct)}</Text>
-            <Money value={h.unrealizedPnL} variant="signedCompact" colored style={type.caption} />
+            <Money value={h.unrealizedPnL} variant="signed" colored style={type.caption} />
           </View>
         </View>
       ))}
@@ -216,7 +216,9 @@ const styles = StyleSheet.create({
   tileHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
   tileLabel: { fontSize: 13, color: colors.textSecondary, fontWeight: '500', flex: 1 },
   sub: { fontSize: 12, color: colors.textMuted, marginTop: 2, fontWeight: '600' },
-  mid: { fontSize: 19, fontWeight: '700', color: colors.text, fontVariant: ['tabular-nums'] },
+  // Sized so full amounts (₹12,34,567.89) fit two tiles to a row on a phone.
+  big: { fontSize: 18, fontWeight: '700', color: colors.text, fontVariant: ['tabular-nums'] },
+  mid: { fontSize: 16, fontWeight: '700', color: colors.text, fontVariant: ['tabular-nums'] },
   mover: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   divider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   moverPct: { fontSize: 15, fontWeight: '700' },

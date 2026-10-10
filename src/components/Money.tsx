@@ -2,14 +2,14 @@ import { useEffect, useState } from 'react';
 import { Pressable, Text, type StyleProp, type TextStyle } from 'react-native';
 
 import { useData } from '../data/DataContext';
-import { formatINR, formatINRCompact, formatSignedINR, pnlColor } from '../lib/format';
+import { formatINR, formatSignedINR, pnlColor } from '../lib/format';
 
 export const MASK = '••••••';
 
 interface MoneyProps {
   value: number;
-  /** "full" ₹1,25,000.00 · "compact" ₹1.25 L · "signed" +₹1,250.00 · "signedCompact" */
-  variant?: 'full' | 'compact' | 'signed' | 'signedCompact';
+  /** "full" ₹1,25,000.00 · "signed" +₹1,250.00 */
+  variant?: 'full' | 'signed';
   /** Colour by sign (green/red/grey). */
   colored?: boolean;
   style?: StyleProp<TextStyle>;
@@ -31,14 +31,7 @@ export function Money({ value, variant = 'full', colored, style, decimals }: Mon
     return () => clearTimeout(t);
   }, [revealed]);
 
-  const text =
-    variant === 'compact'
-      ? formatINRCompact(value)
-      : variant === 'signed'
-        ? formatSignedINR(value)
-        : variant === 'signedCompact'
-          ? formatSignedINR(value, true)
-          : formatINR(value, decimals);
+  const text = variant === 'signed' ? formatSignedINR(value) : formatINR(value, decimals);
 
   const content = (
     <Text style={[{ fontVariant: ['tabular-nums'] }, style, colored && { color: pnlColor(value) }, hidden && { letterSpacing: 1 }]} numberOfLines={1}>

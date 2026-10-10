@@ -31,7 +31,7 @@ export function HoldingDetail({ holding, onClose }: Props) {
 
   const instrumentId = holding?.instrumentId;
   const txns = useMemo(
-    () => sortTransactions(transactions.filter((t) => t.instrumentId === instrumentId)).reverse(),
+    () => sortTransactions(transactions.filter((t) => t.instrumentId === instrumentId || t.demergedInstrumentId === instrumentId)).reverse(),
     [transactions, instrumentId],
   );
   const divs = useMemo(

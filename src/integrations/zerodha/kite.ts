@@ -11,6 +11,8 @@ export interface KiteSession {
   userName?: string;
   /** ISO time the token was issued. */
   issuedAt: string;
+  /** API base to call instead of Kite directly — the auth worker's /kite proxy on web. */
+  apiBase?: string;
 }
 
 export interface KiteHolding {
@@ -50,7 +52,8 @@ export class KiteError extends Error {
   }
   /** Token expired or revoked — the user must log in again. */
   get isAuthError() {
-    return this.status === 403 || this.errorType === 'TokenException';
+    // Kite also answers 403 when the plan lacks an endpoint (PermissionException); that's not a logout.
+    return this.errorType === 'TokenException' || (this.status === 403 && !this.isPermissionError);
   }
   /** The API plan does not include this endpoint (e.g. market quotes). */
   get isPermissionError() {
@@ -79,7 +82,7 @@ export function todayIST(now = new Date()): string {
 type Fetch = typeof fetch;
 
 async function kiteGet<T>(session: KiteSession, path: string, fetchImpl: Fetch = fetch): Promise<T> {
-  const res = await fetchImpl(`${API}${path}`, {
+  const res = await fetchImpl(`${session.apiBase ?? API}${path}`, {
     headers: { 'X-Kite-Version': '3', Authorization: `token ${session.apiKey}:${session.accessToken}` },
   });
   let body: { status?: string; data?: T; message?: string; error_type?: string } = {};
@@ -134,9 +137,22 @@ export interface Mismatch {
   appQty: number;
 }
 
+/** Cost of a stock's open shares, excluding charges: Zerodha's average price vs this app's FIFO lots. */
+export interface InvestedDiff {
+  instrumentId: string;
+  symbol: string;
+  zerodha: number;
+  app: number;
+}
+
 export interface SyncPlan extends ImportPlan {
   quotes: PriceQuote[];
   mismatches: Mismatch[];
+  /** Stocks whose invested amount differs from Zerodha's, largest gap first. */
+  investedDiffs: InvestedDiff[];
+  /** Totals over all holdings, excluding charges (Kite's average price has none). */
+  zerodhaInvested: number;
+  appInvested: number;
   holdingsCount: number;
 }
 
@@ -191,19 +207,46 @@ export function planKiteSync(
   const after = applyImportPlan(data, plan);
   const before = after.transactions.filter((t) => t.portfolioId === opts.portfolioId && t.tradeDate < today);
   const appQty = new Map<string, number>();
-  for (const l of applyFIFO(before).lots) appQty.set(l.instrumentId, (appQty.get(l.instrumentId) ?? 0) + l.remainingQty);
+  const appCost = new Map<string, number>();
+  for (const l of applyFIFO(before).lots) {
+    appQty.set(l.instrumentId, (appQty.get(l.instrumentId) ?? 0) + l.remainingQty);
+    appCost.set(l.instrumentId, (appCost.get(l.instrumentId) ?? 0) + l.remainingQty * l.buyPrice);
+  }
   const zerodhaQty = new Map<string, number>();
-  for (const [h, inst] of holdingInstrument) zerodhaQty.set(inst.id, (zerodhaQty.get(inst.id) ?? 0) + h.quantity + (h.t1_quantity ?? 0));
+  const zerodhaCost = new Map<string, number>();
+  for (const [h, inst] of holdingInstrument) {
+    const qty = h.quantity + (h.t1_quantity ?? 0);
+    zerodhaQty.set(inst.id, (zerodhaQty.get(inst.id) ?? 0) + qty);
+    zerodhaCost.set(inst.id, (zerodhaCost.get(inst.id) ?? 0) + qty * h.average_price);
+  }
+  const symbolOf = (id: string) => instruments.find((i) => i.id === id)?.symbol ?? '?';
 
   const mismatches: Mismatch[] = [];
   for (const id of new Set([...appQty.keys(), ...zerodhaQty.keys()])) {
     const z = zerodhaQty.get(id) ?? 0;
     const a = appQty.get(id) ?? 0;
-    if (Math.abs(z - a) > 1e-6) mismatches.push({ instrumentId: id, symbol: instruments.find((i) => i.id === id)?.symbol ?? '?', zerodhaQty: z, appQty: a });
+    if (Math.abs(z - a) > 1e-6) mismatches.push({ instrumentId: id, symbol: symbolOf(id), zerodhaQty: z, appQty: a });
   }
   mismatches.sort((x, y) => x.symbol.localeCompare(y.symbol));
 
-  return { ...plan, quotes: [...quotes.values()], mismatches, holdingsCount: equityHoldings.length };
+  const investedDiffs: InvestedDiff[] = [];
+  for (const id of new Set([...appCost.keys(), ...zerodhaCost.keys()])) {
+    const z = zerodhaCost.get(id) ?? 0;
+    const a = appCost.get(id) ?? 0;
+    if (Math.abs(z - a) >= 1) investedDiffs.push({ instrumentId: id, symbol: symbolOf(id), zerodha: z, app: a });
+  }
+  investedDiffs.sort((x, y) => Math.abs(y.zerodha - y.app) - Math.abs(x.zerodha - x.app));
+  const sum = (m: Map<string, number>) => [...m.values()].reduce((t, v) => t + v, 0);
+
+  return {
+    ...plan,
+    quotes: [...quotes.values()],
+    mismatches,
+    investedDiffs,
+    zerodhaInvested: sum(zerodhaCost),
+    appInvested: sum(appCost),
+    holdingsCount: equityHoldings.length,
+  };
 }
 
 /** Exchange keys ("NSE:INFY") for instruments that still have open lots anywhere. */

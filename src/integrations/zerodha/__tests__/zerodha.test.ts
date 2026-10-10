@@ -7,7 +7,7 @@ import { DEFAULT_CHARGE_TEMPLATES } from '../../../domain/charges';
 import { applyFIFO } from '../../../domain/fifo';
 import type { AppData } from '../../../domain/types';
 import { applyImportPlan, planImport, type ImportOptions } from '../importer';
-import { planKiteSync, tokenExpiry, tradesToFills, type KiteTrade } from '../kite';
+import { KiteError, planKiteSync, tokenExpiry, tradesToFills, type KiteTrade } from '../kite';
 import { parseCsv, parseTradebook, parseTradeDate } from '../tradebook';
 
 let n = 0;
@@ -129,6 +129,12 @@ describe('kite sync', () => {
     assert.equal(tokenExpiry('2026-10-09T20:30:00.000Z').toISOString(), '2026-10-10T00:30:00.000Z');
   });
 
+  it('treats only token errors as a logout, not a plan without quotes', () => {
+    assert.equal(new KiteError('Incorrect api_key or access_token.', 403, 'TokenException').isAuthError, true);
+    assert.equal(new KiteError('Forbidden', 403).isAuthError, true);
+    assert.equal(new KiteError('Insufficient permission for that call.', 403, 'PermissionException').isAuthError, false);
+  });
+
   it('converts trades, skipping F&O', () => {
     const trades: KiteTrade[] = [
       { trade_id: 't1', order_id: 'o1', exchange: 'NSE', tradingsymbol: 'INFY', product: 'CNC', average_price: 1500, quantity: 2, transaction_type: 'BUY', fill_timestamp: '2026-10-09 09:30:00' },
@@ -163,6 +169,18 @@ describe('kite sync', () => {
     assert.equal(bySymbol.has('INFY'), false); // 15 in both
     assert.equal(bySymbol.get('TCS')?.appQty, 15); // app has 15, Zerodha 10
     assert.equal(bySymbol.get('IRCTC')?.zerodhaQty, 5);
+
+    // Invested excludes charges: Zerodha = qty × average price, app = open FIFO lots × buy price.
+    const appInfy = applyFIFO(data.transactions.filter((t) => t.portfolioId === 'pf_main'))
+      .lots.filter((l) => l.instrumentId === 'in_infy')
+      .reduce((s, l) => s + l.remainingQty * l.buyPrice, 0);
+    assert.equal(plan.zerodhaInvested, 15 * 1290 + 10 * 3500 + 5 * 700);
+    const diffs = new Map(plan.investedDiffs.map((d) => [d.symbol, d]));
+    assert.deepEqual(diffs.get('IRCTC'), { instrumentId: diffs.get('IRCTC')!.instrumentId, symbol: 'IRCTC', zerodha: 3500, app: 0 });
+    if (Math.abs(appInfy - 15 * 1290) >= 1) assert.equal(diffs.get('INFY')?.app, appInfy);
+    else assert.equal(diffs.has('INFY'), false);
+    const gaps = plan.investedDiffs.map((d) => Math.abs(d.zerodha - d.app));
+    assert.deepEqual(gaps, [...gaps].sort((a, b) => b - a));
   });
 });
 

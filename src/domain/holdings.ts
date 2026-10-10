@@ -23,7 +23,8 @@ export function computeHoldings(
   const { lots, realized } = fifo ?? applyFIFO(txns);
   const instrumentById = new Map(instruments.map((i) => [i.id, i]));
   const quoteById = new Map(quotes.map((q) => [q.instrumentId, q]));
-  const tradedIds = [...new Set(txns.map((t) => t.instrumentId))];
+  // A demerger's new company has no transactions of its own; its lots come from the parent.
+  const tradedIds = [...new Set(txns.flatMap((t) => (t.demergedInstrumentId ? [t.instrumentId, t.demergedInstrumentId] : [t.instrumentId])))];
 
   const realizedById = new Map<string, number>();
   for (const r of realized) realizedById.set(r.instrumentId, (realizedById.get(r.instrumentId) ?? 0) + r.gain);

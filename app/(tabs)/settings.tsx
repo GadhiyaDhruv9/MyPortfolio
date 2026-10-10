@@ -112,7 +112,7 @@ export default function Settings() {
           <Row
             first
             title={`STCG ${latestRules.stcgRate}% · LTCG ${latestRules.ltcgRate}%`}
-            subtitle={`Exemption ${formatINR(latestRules.ltcgExemption, 0)} · Cess ${latestRules.cessRate}% · from ${formatDate(latestRules.effectiveFrom)}`}
+            subtitle={`Exemption ${formatINR(latestRules.ltcgExemption)} · Cess ${latestRules.cessRate}% · from ${formatDate(latestRules.effectiveFrom)}`}
             onPress={() => setEditingTax(true)}
           />
         ) : null}

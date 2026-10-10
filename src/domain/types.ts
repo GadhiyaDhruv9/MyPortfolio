@@ -68,6 +68,12 @@ export interface Transaction {
   source?: TxnSource;
   /** Broker fills merged into this transaction (used to skip duplicates on re-import). */
   importedFills?: ImportedFill[];
+  /**
+   * DEMERGER only: the new company's instrument. `quantity` new shares are received for
+   * every `price` shares held, and `costSharePct` % of the cost moves to them.
+   */
+  demergedInstrumentId?: string;
+  costSharePct?: number;
 }
 
 export type TxnSource = 'manual' | 'zerodha_csv' | 'kite';

@@ -14,7 +14,7 @@ import { Select } from '../../src/components/Select';
 import { TransactionForm } from '../../src/components/TransactionForm';
 import { useData, useInstrumentMap } from '../../src/data/DataContext';
 import { useSelection } from '../../src/data/useSelection';
-import { applyFIFO, sortTransactions } from '../../src/domain/fifo';
+import { applyFIFO, sortTransactions, transactionsFor } from '../../src/domain/fifo';
 import type { Transaction, TxnType } from '../../src/domain/types';
 import { confirm, notify } from '../../src/lib/confirm';
 import { formatDate, formatINR, formatQty } from '../../src/lib/format';
@@ -71,7 +71,7 @@ export default function Transactions() {
     const ok = await confirm('Delete transaction?', `${t.type} ${formatQty(t.quantity)} ${sym} on ${formatDate(t.tradeDate)}. Lots and realized P&L will be recalculated.`);
     if (!ok) return;
     const remaining = data.transactions.filter((x) => x.id !== t.id);
-    const scoped = (list: Transaction[]) => list.filter((x) => x.portfolioId === t.portfolioId && x.instrumentId === t.instrumentId);
+    const scoped = (list: Transaction[]) => transactionsFor(list, t.portfolioId, t.instrumentId);
     const before = applyFIFO(scoped(data.transactions)).issues.length;
     const after = applyFIFO(scoped(remaining)).issues.length;
     deleteTransaction(t.id);
@@ -124,6 +124,7 @@ export default function Transactions() {
               txn={t}
               index={i}
               symbol={instruments.get(t.instrumentId)?.symbol ?? '?'}
+              demergedSymbol={t.demergedInstrumentId ? (instruments.get(t.demergedInstrumentId)?.symbol ?? '?') : undefined}
               portfolio={data.portfolios.length > 1 ? data.portfolios.find((p) => p.id === t.portfolioId)?.name : undefined}
               issue={issueById.get(t.id)}
               onEdit={() => setForm({ editing: t })}
@@ -145,6 +146,7 @@ export default function Transactions() {
 function TxnRow({
   txn: t,
   symbol,
+  demergedSymbol,
   portfolio,
   issue,
   index,
@@ -153,6 +155,8 @@ function TxnRow({
 }: {
   txn: Transaction;
   symbol: string;
+  /** DEMERGER: the new company's symbol. */
+  demergedSymbol?: string;
   portfolio?: string;
   issue?: string;
   index: number;
@@ -161,7 +165,13 @@ function TxnRow({
 }) {
   const showAmount = t.type !== 'BONUS' && t.type !== 'SPLIT' && t.type !== 'MERGER' && t.type !== 'DEMERGER';
   const detail =
-    t.type === 'BONUS' ? `Bonus ${formatQty(t.quantity)}:${formatQty(t.price)}` : t.type === 'SPLIT' ? `Split 1 → ${formatQty(t.price)}` : `${formatQty(t.quantity)} @ ${formatINR(t.price)}`;
+    t.type === 'BONUS'
+      ? `Bonus ${formatQty(t.quantity)}:${formatQty(t.price)}`
+      : t.type === 'SPLIT'
+        ? `Split 1 → ${formatQty(t.price)}`
+        : t.type === 'DEMERGER' && demergedSymbol
+          ? `${formatQty(t.quantity)} ${demergedSymbol} per ${formatQty(t.price)} held · ${formatQty(t.costSharePct ?? 0)}% of cost`
+          : `${formatQty(t.quantity)} @ ${formatINR(t.price)}`;
   return (
     <Card index={index} style={issue ? { borderWidth: 1, borderColor: colors.errorBright } : undefined}>
       <View style={styles.row}>

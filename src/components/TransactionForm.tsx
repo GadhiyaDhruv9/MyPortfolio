@@ -5,7 +5,7 @@ import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { useData } from '../data/DataContext';
 import { uid } from '../data/store';
 import { calculateCharges, CHARGE_FIELDS, manualCharges, type ChargeBreakdown } from '../domain/charges';
-import { applyFIFO, LOT_CONSUMING_TYPES, previewSell, round2, todayISO } from '../domain/fifo';
+import { applyFIFO, linkedInstrumentIds, LOT_CONSUMING_TYPES, previewSell, round2, todayISO } from '../domain/fifo';
 import type { Instrument, ProductType, Transaction, TxnType } from '../domain/types';
 import { formatDate, formatINR, formatQty, parseNumber, pnlColor } from '../lib/format';
 import { colors, radius, spacing, type } from '../lib/theme';
@@ -28,7 +28,7 @@ const OTHER_TYPES: { label: string; value: TxnType; description: string }[] = [
   { label: 'Transfer out', value: 'TRANSFER_OUT', description: 'Shares moved out (FIFO, no gain booked)' },
   { label: 'Gift received', value: 'GIFT', description: 'Shares received as a gift (enter donor’s cost)' },
   { label: 'Merger', value: 'MERGER', description: 'Recorded for reference only' },
-  { label: 'Demerger', value: 'DEMERGER', description: 'Recorded for reference only' },
+  { label: 'Demerger', value: 'DEMERGER', description: 'New company’s shares, with part of the cost moved to them' },
 ];
 
 const PRODUCT_TYPES: { label: string; value: ProductType }[] = [
@@ -50,8 +50,8 @@ export function TransactionForm({ editing, onClose }: Props) {
 
   const [txnType, setTxnType] = useState<TxnType>(editing?.type ?? 'BUY');
   const [instrumentId, setInstrumentId] = useState(editing?.instrumentId ?? '');
-  const [instrumentQuery, setInstrumentQuery] = useState('');
-  const [addingInstrument, setAddingInstrument] = useState(false);
+  const [demergedId, setDemergedId] = useState(editing?.demergedInstrumentId ?? '');
+  const [costShare, setCostShare] = useState(editing?.costSharePct != null ? String(editing.costSharePct) : '');
   const [portfolioId, setPortfolioId] = useState(editing?.portfolioId ?? selectedPortfolioId ?? data.portfolios[0]?.id ?? '');
   const [tradeDate, setTradeDate] = useState(editing?.tradeDate ?? todayISO());
   const [quantity, setQuantity] = useState(editing ? String(editing.quantity) : '');
@@ -66,14 +66,15 @@ export function TransactionForm({ editing, onClose }: Props) {
   const [tags, setTags] = useState(editing?.tags?.join(', ') ?? '');
   const [submitted, setSubmitted] = useState(false);
 
-  const instrument = data.instruments.find((i) => i.id === instrumentId);
   const qty = parseNumber(quantity);
   const px = parseNumber(price);
   const isBuySell = txnType === 'BUY' || txnType === 'SELL';
+  const isDemerger = txnType === 'DEMERGER';
+  const costSharePct = parseNumber(costShare);
   const isSellLike = LOT_CONSUMING_TYPES.includes(txnType);
   const side = isSellLike ? 'SELL' : 'BUY';
   const needsQty = txnType !== 'SPLIT';
-  const needsPrice = txnType !== 'TRANSFER_OUT' && txnType !== 'MERGER' && txnType !== 'DEMERGER';
+  const needsPrice = txnType !== 'TRANSFER_OUT' && txnType !== 'MERGER';
   const template = data.chargeTemplates.find((t) => t.id === templateId);
 
   const charges: ChargeBreakdown | null = useMemo(() => {
@@ -113,8 +114,10 @@ export function TransactionForm({ editing, onClose }: Props) {
       // Keep import metadata so re-importing the same broker trades doesn't duplicate them.
       source: editing?.source,
       importedFills: editing?.importedFills,
+      demergedInstrumentId: isDemerger ? demergedId || undefined : undefined,
+      costSharePct: isDemerger && Number.isFinite(costSharePct) ? costSharePct : undefined,
     };
-  }, [instrumentId, portfolioId, charges, needsQty, needsPrice, qty, px, txnType, tradeDate, productType, reason, notes, tags, override, isBuySell, templateId, editing]);
+  }, [instrumentId, portfolioId, charges, needsQty, needsPrice, qty, px, txnType, tradeDate, productType, reason, notes, tags, override, isBuySell, templateId, editing, isDemerger, demergedId, costSharePct]);
 
   const preview = useMemo(() => {
     if (!draft || !isSellLike || !(draft.quantity > 0)) return null;
@@ -125,12 +128,11 @@ export function TransactionForm({ editing, onClose }: Props) {
   const downstreamIssue = useMemo(() => {
     if (!draft) return null;
     const others = data.transactions.filter((t) => t.id !== editing?.id);
-    const scope = (list: Transaction[]) =>
-      list.filter(
-        (t) =>
-          (t.portfolioId === draft.portfolioId && t.instrumentId === draft.instrumentId) ||
-          (editing && t.portfolioId === editing.portfolioId && t.instrumentId === editing.instrumentId),
-      );
+    // Same scope before and after, including stocks linked by a demerger.
+    const all = [...data.transactions, draft];
+    const ids = new Set([...linkedInstrumentIds(all, draft.instrumentId), ...(editing ? linkedInstrumentIds(all, editing.instrumentId) : [])]);
+    const portfolios = new Set([draft.portfolioId, editing?.portfolioId]);
+    const scope = (list: Transaction[]) => list.filter((t) => portfolios.has(t.portfolioId) && ids.has(t.instrumentId));
     const before = new Set(applyFIFO(scope(data.transactions)).issues.map((i) => i.txnId));
     const after = applyFIFO(scope([...others, draft])).issues.filter((i) => i.txnId !== draft.id && !before.has(i.txnId));
     if (!after.length) return null;
@@ -142,7 +144,16 @@ export function TransactionForm({ editing, onClose }: Props) {
     instrument: !instrumentId ? 'Choose an instrument' : null,
     portfolio: !portfolioId ? 'Choose a portfolio' : null,
     quantity: needsQty && !(qty > 0) ? 'Enter a quantity above 0' : null,
-    price: needsPrice && !(px > 0) ? (txnType === 'SPLIT' ? 'Enter the split ratio' : txnType === 'BONUS' ? 'Enter the held-shares part of the ratio' : 'Enter a price above 0') : null,
+    price:
+      needsPrice && !(px > 0)
+        ? txnType === 'SPLIT'
+          ? 'Enter the split ratio'
+          : txnType === 'BONUS' || isDemerger
+            ? 'Enter the held-shares part of the ratio'
+            : 'Enter a price above 0'
+        : null,
+    demerged: !isDemerger ? null : !demergedId ? 'Choose the new company' : demergedId === instrumentId ? 'Choose a different company' : null,
+    costShare: isDemerger && !(costSharePct >= 0 && costSharePct < 100) ? 'Enter a percentage from 0 to under 100' : null,
     charges: override && !(parseNumber(manualTotal) >= 0) ? 'Enter total charges (0 or more)' : null,
     oversell: preview && preview.shortfall > 1e-9 ? `You only hold ${formatQty(preview.available)} shares on ${formatDate(tradeDate)}.` : null,
     downstream: downstreamIssue,
@@ -157,15 +168,17 @@ export function TransactionForm({ editing, onClose }: Props) {
   };
 
   const show = (e: string | null) => (submitted ? e : null);
-  const matches = useMemo(() => {
-    const q = instrumentQuery.trim().toLowerCase();
-    if (!q) return [];
-    return data.instruments.filter((i) => i.symbol.toLowerCase().includes(q) || i.companyName.toLowerCase().includes(q)).slice(0, 6);
-  }, [instrumentQuery, data.instruments]);
 
-  const qtyLabel = txnType === 'BONUS' ? 'Bonus shares (ratio, e.g. 1)' : 'Quantity';
+  const qtyLabel = txnType === 'BONUS' ? 'Bonus shares (ratio, e.g. 1)' : isDemerger ? 'New shares (ratio, e.g. 1)' : 'Quantity';
   const priceLabel =
-    txnType === 'BONUS' ? 'For every … held (e.g. 1)' : txnType === 'SPLIT' ? 'Split ratio (new shares per old)' : txnType === 'GIFT' ? 'Donor’s cost per share' : 'Price per share';
+    txnType === 'BONUS' || isDemerger
+      ? 'For every … held (e.g. 1)'
+      : txnType === 'SPLIT'
+        ? 'Split ratio (new shares per old)'
+        : txnType === 'GIFT'
+          ? 'Donor’s cost per share'
+          : 'Price per share';
+  const ratioOnly = txnType === 'BONUS' || txnType === 'SPLIT' || isDemerger;
   const tradeValue = (needsQty ? qty || 0 : 0) * (needsPrice ? px || 0 : 0);
 
   return (
@@ -188,57 +201,26 @@ export function TransactionForm({ editing, onClose }: Props) {
         onChange={setTxnType}
       />
 
-      {/* Instrument autocomplete */}
-      <View style={{ gap: 6 }}>
-        {instrument ? (
-          <>
-            <Text style={styles.label}>Instrument</Text>
-            <View style={styles.selectedInstrument}>
-              <View style={{ flex: 1 }}>
-                <Text style={type.h3}>
-                  {instrument.symbol} <Text style={type.caption}>{instrument.exchange}</Text>
-                </Text>
-                <Text style={type.caption} numberOfLines={1}>
-                  {instrument.companyName}
-                </Text>
-              </View>
-              <Button title="Change" size="sm" variant="ghost" onPress={() => setInstrumentId('')} />
-            </View>
-          </>
-        ) : (
-          <>
-            <Input
-              label="Instrument"
-              placeholder="Search symbol or company (e.g. INFY)"
-              value={instrumentQuery}
-              onChangeText={setInstrumentQuery}
-              autoCapitalize="characters"
-              autoCorrect={false}
-              error={show(errors.instrument)}
-              right={<Ionicons name="search" size={18} color={colors.textMuted} />}
-            />
-            {instrumentQuery.trim() ? (
-              <View style={styles.dropdown}>
-                {matches.map((m, i) => (
-                  <InstrumentOption
-                    key={m.id}
-                    instrument={m}
-                    divider={i > 0}
-                    onPress={() => {
-                      setInstrumentId(m.id);
-                      setInstrumentQuery('');
-                    }}
-                  />
-                ))}
-                <Pressable onPress={() => setAddingInstrument(true)} style={[styles.option, matches.length > 0 && styles.divider]} accessibilityRole="button">
-                  <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
-                  <Text style={{ color: colors.primary, fontWeight: '600' }}>Add “{instrumentQuery.trim().toUpperCase()}” as new instrument</Text>
-                </Pressable>
-              </View>
-            ) : null}
-          </>
-        )}
-      </View>
+      <InstrumentPicker
+        label={isDemerger ? 'Company that demerged' : 'Instrument'}
+        value={instrumentId}
+        onChange={setInstrumentId}
+        error={show(errors.instrument)}
+      />
+      {isDemerger ? (
+        <>
+          <InstrumentPicker label="New company (shares received)" value={demergedId} onChange={setDemergedId} error={show(errors.demerged)} />
+          <Input
+            label="Cost moved to the new company (%)"
+            numeric
+            value={costShare}
+            onChangeText={setCostShare}
+            error={show(errors.costShare)}
+            hint="From the company’s cost-of-acquisition announcement. Your original buy dates carry over to the new shares."
+            placeholder="0"
+          />
+        </>
+      ) : null}
 
       {data.portfolios.length > 0 ? (
         <Select
@@ -258,7 +240,7 @@ export function TransactionForm({ editing, onClose }: Props) {
           <Input label={qtyLabel} numeric value={quantity} onChangeText={setQuantity} style={{ flex: 1 }} error={show(errors.quantity)} placeholder="0" />
         ) : null}
         {needsPrice ? (
-          <Input label={priceLabel} numeric value={price} onChangeText={setPrice} prefix={txnType === 'BONUS' || txnType === 'SPLIT' ? undefined : '₹'} style={{ flex: 1 }} error={show(errors.price)} placeholder="0.00" />
+          <Input label={priceLabel} numeric value={price} onChangeText={setPrice} prefix={ratioOnly ? undefined : '₹'} style={{ flex: 1 }} error={show(errors.price)} placeholder="0.00" />
         ) : null}
       </View>
 
@@ -305,7 +287,8 @@ export function TransactionForm({ editing, onClose }: Props) {
         </View>
       ) : null}
 
-      <View style={styles.netBox}>
+      {isDemerger ? null : (
+        <View style={styles.netBox}>
         <View>
           <Text style={type.small}>{side === 'BUY' ? 'Net amount payable' : 'Net amount receivable'}</Text>
           <Text style={type.caption}>
@@ -313,7 +296,8 @@ export function TransactionForm({ editing, onClose }: Props) {
           </Text>
         </View>
         <Text style={styles.netValue}>{formatINR(draft?.netAmount ?? round2(tradeValue))}</Text>
-      </View>
+        </View>
+      )}
 
       {preview ? <SellPreviewBox preview={preview} error={errors.oversell} isSell={txnType === 'SELL'} /> : null}
       {errors.downstream ? (
@@ -327,18 +311,71 @@ export function TransactionForm({ editing, onClose }: Props) {
       <Input label="Notes" value={notes} onChangeText={setNotes} multiline placeholder="Order ref, contract note details…" />
       <Input label="Tags" value={tags} onChangeText={setTags} placeholder="long-term, dividend (comma separated)" autoCapitalize="none" />
 
-      {addingInstrument ? (
-        <InstrumentForm
-          initialSymbol={instrumentQuery}
-          onClose={() => setAddingInstrument(false)}
-          onSaved={(i) => {
-            setInstrumentId(i.id);
-            setInstrumentQuery('');
-            setAddingInstrument(false);
-          }}
-        />
-      ) : null}
     </Modal>
+  );
+}
+
+/** Search box for an instrument, with the option to add a new one. */
+function InstrumentPicker({ label, value, onChange, error }: { label: string; value: string; onChange: (id: string) => void; error?: string | null }) {
+  const { data } = useData();
+  const [query, setQuery] = useState('');
+  const [adding, setAdding] = useState(false);
+  const instrument = data.instruments.find((i) => i.id === value);
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    return data.instruments.filter((i) => i.symbol.toLowerCase().includes(q) || i.companyName.toLowerCase().includes(q)).slice(0, 6);
+  }, [query, data.instruments]);
+  const pick = (id: string) => {
+    onChange(id);
+    setQuery('');
+    setAdding(false);
+  };
+
+  return (
+    <View style={{ gap: 6 }}>
+      {instrument ? (
+        <>
+          <Text style={styles.label}>{label}</Text>
+          <View style={styles.selectedInstrument}>
+            <View style={{ flex: 1 }}>
+              <Text style={type.h3}>
+                {instrument.symbol} <Text style={type.caption}>{instrument.exchange}</Text>
+              </Text>
+              <Text style={type.caption} numberOfLines={1}>
+                {instrument.companyName}
+              </Text>
+            </View>
+            <Button title="Change" size="sm" variant="ghost" onPress={() => onChange('')} />
+          </View>
+        </>
+      ) : (
+        <>
+          <Input
+            label={label}
+            placeholder="Search symbol or company (e.g. INFY)"
+            value={query}
+            onChangeText={setQuery}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            error={error}
+            right={<Ionicons name="search" size={18} color={colors.textMuted} />}
+          />
+          {query.trim() ? (
+            <View style={styles.dropdown}>
+              {matches.map((m, i) => (
+                <InstrumentOption key={m.id} instrument={m} divider={i > 0} onPress={() => pick(m.id)} />
+              ))}
+              <Pressable onPress={() => setAdding(true)} style={[styles.option, matches.length > 0 && styles.divider]} accessibilityRole="button">
+                <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
+                <Text style={{ color: colors.primary, fontWeight: '600' }}>Add “{query.trim().toUpperCase()}” as new instrument</Text>
+              </Pressable>
+            </View>
+          ) : null}
+        </>
+      )}
+      {adding ? <InstrumentForm initialSymbol={query} onClose={() => setAdding(false)} onSaved={(i) => pick(i.id)} /> : null}
+    </View>
   );
 }
 

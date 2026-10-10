@@ -22,20 +22,9 @@ export function formatINR(n: number, decimals = 2): string {
   return `${n < 0 ? '-' : ''}₹${formatNumber(Math.abs(n), decimals)}`;
 }
 
-/** Compact rupee amount: ₹1.25 Cr, ₹4.50 L, ₹12.3K. */
-export function formatINRCompact(n: number): string {
-  if (!Number.isFinite(n)) return '—';
-  const sign = n < 0 ? '-' : '';
-  const a = Math.abs(n);
-  if (a >= 1e7) return `${sign}₹${(a / 1e7).toFixed(2)} Cr`;
-  if (a >= 1e5) return `${sign}₹${(a / 1e5).toFixed(2)} L`;
-  if (a >= 1e3) return `${sign}₹${(a / 1e3).toFixed(1)}K`;
-  return `${sign}₹${a.toFixed(0)}`;
-}
-
 /** Signed rupee amount for P&L: +₹1,250.00 / -₹300.00 */
-export function formatSignedINR(n: number, compact = false): string {
-  const body = compact ? formatINRCompact(Math.abs(n)) : formatINR(Math.abs(n));
+export function formatSignedINR(n: number): string {
+  const body = formatINR(Math.abs(n));
   if (Math.abs(n) < 0.005) return body;
   return `${n > 0 ? '+' : '-'}${body}`;
 }
